@@ -1,0 +1,556 @@
+name: Build Android APK
+
+'on':
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Accept Android SDK Licenses
+        run: |
+          yes | sdkmanager --licenses || true
+
+      - name: Generate Android Project Structure
+        run: |
+          mkdir -p app/src/main/java/com/azwaq/calculator
+          mkdir -p app/src/main/assets
+          mkdir -p app/src/main/res/values
+
+          # 1. إعداد settings.gradle
+          cat << 'EOF' > settings.gradle
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          rootProject.name = "AzwaqSignCalc"
+          include ':app'
+          EOF
+
+          # 2. إعداد build.gradle الرئيسي
+          cat << 'EOF' > build.gradle
+          plugins {
+              id 'com.android.application' version '8.2.2' apply false
+          }
+          EOF
+
+          # 3. إعداد app/build.gradle للتطبيق
+          cat << 'EOF' > app/build.gradle
+          plugins {
+              id 'com.android.application'
+          }
+
+          android {
+              namespace 'com.azwaq.calculator'
+              compileSdk 34
+
+              defaultConfig {
+                  applicationId "com.azwaq.calculator"
+                  minSdk 21
+                  targetSdk 34
+                  versionCode 1
+                  versionName "1.0.0"
+              }
+
+              buildTypes {
+                  release {
+                      minifyEnabled false
+                      signingConfig signingConfigs.debug
+                  }
+                  debug {
+                      signingConfig signingConfigs.debug
+                  }
+              }
+
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_17
+                  targetCompatibility JavaVersion.VERSION_17
+              }
+          }
+          EOF
+
+          # 4. إعداد AndroidManifest.xml
+          cat << 'EOF' > app/src/main/AndroidManifest.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+              <uses-permission android:name="android.permission.INTERNET" />
+
+              <application
+                  android:allowBackup="true"
+                  android:icon="@mipmap/ic_launcher"
+                  android:label="@string/app_name"
+                  android:roundIcon="@mipmap/ic_launcher"
+                  android:supportsRtl="true"
+                  android:theme="@android:style/Theme.DeviceDefault.Light.NoActionBar">
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true"
+                      android:configChanges="orientation|screenSize|keyboardHidden">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+              </application>
+
+          </manifest>
+          EOF
+
+          # 5. إعداد strings.xml
+          cat << 'EOF' > app/src/main/res/values/strings.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <string name="app_name">شركة أذواق - حاسبة اللافتات</string>
+          </resources>
+          EOF
+
+          # 6. كتابة كود MainActivity.java للتحكم بالتطبيق ودعم التنبيهات والتخزين
+          cat << 'EOF' > app/src/main/java/com/azwaq/calculator/MainActivity.java
+          package com.azwaq.calculator;
+
+          import android.app.Activity;
+          import android.app.AlertDialog;
+          import android.graphics.Color;
+          import android.os.Build;
+          import android.os.Bundle;
+          import android.view.Window;
+          import android.view.WindowManager;
+          import android.webkit.JsResult;
+          import android.webkit.WebChromeClient;
+          import android.webkit.WebSettings;
+          import android.webkit.WebView;
+          import android.webkit.WebViewClient;
+
+          public class MainActivity extends Activity {
+              private WebView webView;
+
+              @Override
+              protected void onCreate(Bundle savedInstanceState) {
+                  super.onCreate(savedInstanceState);
+
+                  requestWindowFeature(Window.FEATURE_NO_TITLE);
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                      Window window = getWindow();
+                      window.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);
+                      window.setStatusBarColor(Color.parseColor("#0f172a"));
+                  }
+
+                  webView = new WebView(this);
+                  setContentView(webView);
+
+                  WebSettings settings = webView.getSettings();
+                  settings.setJavaScriptEnabled(true);
+                  settings.setDomStorageEnabled(true);
+                  settings.setDatabaseEnabled(true);
+                  settings.setAllowFileAccess(true);
+                  settings.setAllowContentAccess(true);
+                  settings.setUseWideViewPort(true);
+                  settings.setLoadWithOverviewMode(true);
+
+                  webView.setWebViewClient(new WebViewClient());
+                  webView.setWebChromeClient(new WebChromeClient() {
+                      @Override
+                      public boolean onJsAlert(WebView view, String url, String message, final JsResult result) {
+                          new AlertDialog.Builder(MainActivity.this)
+                              .setTitle("شركة أذواق")
+                              .setMessage(message)
+                              .setPositiveButton(android.R.string.ok, (dialog, which) -> result.confirm())
+                              .setCancelable(false)
+                              .create()
+                              .show();
+                          return true;
+                      }
+
+                      @Override
+                      public boolean onJsConfirm(WebView view, String url, String message, final JsResult result) {
+                          new AlertDialog.Builder(MainActivity.this)
+                              .setTitle("تأكيد")
+                              .setMessage(message)
+                              .setPositiveButton("نعم", (dialog, which) -> result.confirm())
+                              .setNegativeButton("إلغاء", (dialog, which) -> result.cancel())
+                              .setCancelable(false)
+                              .create()
+                              .show();
+                          return true;
+                      }
+                  });
+
+                  webView.loadUrl("file:///android_asset/index.html");
+              }
+
+              @Override
+              public void onBackPressed() {
+                  if (webView != null && webView.canGoBack()) {
+                      webView.goBack();
+                  } else {
+                      super.onBackPressed();
+                  }
+              }
+          }
+          EOF
+
+      - name: Generate Custom App Icons
+        run: |
+          python3 -c "
+          import zlib, struct, os
+
+          def make_icon(size):
+              raw = bytearray()
+              for y in range(size):
+                  raw.append(0)
+                  for x in range(size):
+                      cx, cy = size / 2.0, size / 2.0
+                      r = size / 2.0 - 1
+                      dist = ((x - cx)**2 + (y - cy)**2)**0.5
+                      if dist <= r:
+                          in_box = (size*0.22 <= x <= size*0.78) and (size*0.22 <= y <= size*0.78)
+                          if in_box:
+                              raw.extend([217, 119, 6, 255])
+                          else:
+                              raw.extend([15, 23, 42, 255])
+                      else:
+                          raw.extend([0, 0, 0, 0])
+              comp = zlib.compress(bytes(raw))
+              png = bytearray(b'\x89PNG\r\n\x1a\n')
+              ihdr = struct.pack('>IIBBBBB', size, size, 8, 6, 0, 0, 0)
+              png.extend(struct.pack('>I', 13) + b'IHDR' + ihdr + struct.pack('>I', zlib.crc32(b'IHDR' + ihdr)))
+              png.extend(struct.pack('>I', len(comp)) + b'IDAT' + comp + struct.pack('>I', zlib.crc32(b'IDAT' + comp)))
+              png.extend(struct.pack('>I', 0) + b'IEND' + struct.pack('>I', zlib.crc32(b'IEND')))
+              return bytes(png)
+
+          densities = [('mipmap-mdpi', 48), ('mipmap-hdpi', 72), ('mipmap-xhdpi', 96), ('mipmap-xxhdpi', 144)]
+          for folder, s in densities:
+              path = f'app/src/main/res/{folder}'
+              os.makedirs(path, exist_ok=True)
+              with open(f'{path}/ic_launcher.png', 'wb') as f:
+                  f.write(make_icon(s))
+          "
+
+      - name: Embed Web App HTML/JS/CSS Code
+        run: |
+          cat << 'EOF' > app/src/main/assets/index.html
+          <!DOCTYPE html>
+          <html lang="ar" dir="rtl">
+          <head>
+              <meta charset="UTF-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+              <title>شركة أذواق - حاسبة اللافتات</title>
+              <style>
+                  @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;600;700&display=swap');
+                  * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Cairo', sans-serif; -webkit-tap-highlight-color: transparent; }
+                  body { background-color: #0f172a; color: #f8fafc; min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 16px; user-select: none; -webkit-user-select: none; }
+                  .container { width: 100%; max-width: 480px; background-color: #1e293b; border-radius: 16px; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5); overflow: hidden; border: 1px solid #334155; }
+                  .header { background-color: #0f172a; padding: 16px 20px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #334155; }
+                  .header h1 { font-size: 15px; color: #fbbf24; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+                  .tabs { display: flex; gap: 8px; }
+                  .tab-btn { padding: 6px 12px; font-size: 12px; border-radius: 8px; font-weight: 600; cursor: pointer; border: none; transition: 0.2s; }
+                  .tab-active { background-color: #d97706; color: #fff; }
+                  .tab-inactive { background-color: #334155; color: #cbd5e1; }
+                  .tab-inactive:hover { background-color: #475569; }
+                  .content { padding: 20px; }
+                  .form-group { margin-bottom: 16px; }
+                  label { display: block; font-size: 13px; color: #94a3b8; margin-bottom: 6px; }
+                  select, input { width: 100%; background-color: #0f172a; border: 1px solid #334155; border-radius: 10px; padding: 12px; color: #fff; font-size: 14px; outline: none; user-select: auto; -webkit-user-select: auto; }
+                  select:focus, input:focus { border-color: #fbbf24; }
+                  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+                  .btn-main { width: 100%; background-color: #d97706; color: #fff; font-weight: bold; padding: 14px; border-radius: 10px; border: none; cursor: pointer; font-size: 15px; transition: 0.2s; margin-top: 10px; box-shadow: 0 4px 6px -1px rgba(217, 119, 6, 0.3); }
+                  .btn-main:hover { background-color: #b45309; }
+                  .result-box { background-color: #020617; padding: 16px; border-radius: 10px; border: 1px solid #1e293b; margin-top: 20px; }
+                  .result-row { display: flex; justify-content: space-between; font-size: 14px; color: #94a3b8; margin-bottom: 8px; }
+                  .result-total { display: flex; justify-content: space-between; align-items: center; padding-top: 8px; border-top: 1px solid #1e293b; margin-top: 8px; }
+                  .result-total span:last-child { font-size: 24px; font-weight: bold; color: #fbbf24; }
+                  .hidden { display: none !important; }
+                  .settings-list { max-height: 260px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding-right: 2px; }
+                  .setting-item { background-color: #0f172a; padding: 10px; border-radius: 10px; border: 1px solid #334155; display: flex; align-items: center; gap: 8px; }
+                  .setting-item input[type="text"] { width: 52%; padding: 8px; font-size: 13px; }
+                  .setting-item input[type="number"] { width: 33%; padding: 8px; font-size: 13px; color: #fbbf24; }
+                  .btn-del { background: none; border: none; color: #f43f5e; cursor: pointer; font-size: 16px; padding: 4px; }
+                  .hint { font-size: 12px; color: #fbbf24; margin-top: 6px; font-weight: 600; }
+                  .add-box { background-color: #0f172a; padding: 14px; border-radius: 10px; border: 1px solid #334155; margin-top: 16px; }
+                  .btn-secondary { width: 100%; background-color: #1e293b; color: #fbbf24; border: 1px solid rgba(251, 191, 36, 0.3); padding: 10px; border-radius: 8px; font-weight: 600; cursor: pointer; font-size: 13px; margin-top: 8px; }
+                  .modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; z-index: 100; }
+                  .modal-content { background: #1e293b; padding: 20px; border-radius: 12px; border: 1px solid #334155; width: 90%; max-width: 320px; text-align: center; }
+                  .modal-btn { background: #d97706; color: white; border: none; padding: 8px 16px; border-radius: 6px; margin-top: 12px; cursor: pointer; font-weight: bold; }
+              </style>
+          </head>
+          <body>
+
+              <div class="container">
+                  <!-- رأس التطبيق -->
+                  <div class="header">
+                      <h1>🏪 شركة أذواق - حاسبة اللافتات</h1>
+                      <div class="tabs">
+                          <button onclick="switchTab('calc')" id="tab-calc-btn" class="tab-btn tab-active">الحاسبة</button>
+                          <button onclick="switchTab('settings')" id="tab-settings-btn" class="tab-btn tab-inactive">الإعدادات</button>
+                      </div>
+                  </div>
+
+                  <!-- تبويب الحاسبة -->
+                  <div id="tab-calc" class="content">
+                      <div class="form-group">
+                          <label>اختر الصنف / نوع اللافتة:</label>
+                          <select id="item-select" onchange="updatePriceHint()">
+                              <!-- تُعبأ برمجياً -->
+                          </select>
+                          <div id="price-hint" class="hint">سعر المتر المربع: 0</div>
+                      </div>
+
+                      <div class="grid-2">
+                          <div class="form-group">
+                              <label>الطول (بالمتر):</label>
+                              <input type="number" id="input-length" step="0.01" placeholder="مثال: 3">
+                          </div>
+                          <div class="form-group">
+                              <label>العرض (بالمتر):</label>
+                              <input type="number" id="input-width" step="0.01" placeholder="مثال: 1.5">
+                          </div>
+                      </div>
+
+                      <button onclick="calculatePrice()" class="btn-main">حساب السعر الإجمالي</button>
+
+                      <div class="result-box">
+                          <div class="result-row">
+                              <span>المساحة الإجمالية:</span>
+                              <span id="res-area" style="color: #fff; font-weight: 600;">0 متر مربع</span>
+                          </div>
+                          <div class="result-total">
+                              <span style="color: #cbd5e1; font-weight: bold;">السعر الإجمالي:</span>
+                              <span id="res-total">0</span>
+                          </div>
+                      </div>
+                  </div>
+
+                  <!-- تبويب الإعدادات والأسعار -->
+                  <div id="tab-settings" class="content hidden">
+                      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                          <span style="font-size: 13px; font-weight: bold; color: #cbd5e1;">تعديل الأصناف والأسعار (للمتر المربع)</span>
+                          <button onclick="resetToDefaults()" style="background:none; border:none; color:#f43f5e; font-size:11px; cursor:pointer; font-weight:600;">استعادة الافتراضي</button>
+                      </div>
+
+                      <div id="items-settings-list" class="settings-list">
+                          <!-- تُعبأ برمجياً -->
+                      </div>
+
+                      <div class="add-box">
+                          <div style="font-size: 12px; font-weight: bold; color: #fbbf24; margin-bottom: 8px;">إضافة صنف جديد</div>
+                          <div class="form-group" style="margin-bottom: 8px;">
+                              <input type="text" id="new-item-name" placeholder="اسم الصنف (مثال: حروف بارزة)">
+                          </div>
+                          <div class="form-group" style="margin-bottom: 8px;">
+                              <input type="number" id="new-item-price" placeholder="سعر المتر المربع">
+                          </div>
+                          <button onclick="addNewItem()" class="btn-secondary">إضافة للقائمة</button>
+                      </div>
+                  </div>
+              </div>
+
+              <!-- نافذة رسائل مخصصة بدلاً من alert -->
+              <div id="custom-modal" class="modal hidden">
+                  <div class="modal-content">
+                      <p id="modal-msg" style="font-size: 14px; color: #f8fafc; margin-bottom: 8px;"></p>
+                      <button onclick="closeModal()" class="modal-btn">موافق</button>
+                  </div>
+              </div>
+
+              <script>
+                  const defaultItems = [
+                      { id: 'banner', name: 'بنر عادي', price: 25 },
+                      { id: 'flex_print', name: 'فلكس طباعة فقط', price: 40 },
+                      { id: 'flex_frame', name: 'فلكس مع إطار', price: 70 },
+                      { id: 'flex_light', name: 'فلكس إطار ضوئي (صندوق مضيء)', price: 120 },
+                      { id: 'sticker', name: 'لاصق (ستيكر)', price: 45 }
+                  ];
+
+                  let items = JSON.parse(localStorage.getItem('azwaq_items')) || defaultItems;
+
+                  function saveToStorage() {
+                      try {
+                          localStorage.setItem('azwaq_items', JSON.stringify(items));
+                      } catch(e) {}
+                  }
+
+                  function showMsg(txt) {
+                      document.getElementById('modal-msg').innerText = txt;
+                      document.getElementById('custom-modal').classList.remove('hidden');
+                  }
+
+                  function closeModal() {
+                      document.getElementById('custom-modal').classList.add('hidden');
+                  }
+
+                  function switchTab(tab) {
+                      const calcTab = document.getElementById('tab-calc');
+                      const settingsTab = document.getElementById('tab-settings');
+                      const calcBtn = document.getElementById('tab-calc-btn');
+                      const settingsBtn = document.getElementById('tab-settings-btn');
+
+                      if (tab === 'calc') {
+                          calcTab.classList.remove('hidden');
+                          settingsTab.classList.add('hidden');
+                          calcBtn.className = "tab-btn tab-active";
+                          settingsBtn.className = "tab-btn tab-inactive";
+                          populateSelect();
+                      } else {
+                          calcTab.classList.add('hidden');
+                          settingsTab.classList.remove('hidden');
+                          settingsBtn.className = "tab-btn tab-active";
+                          calcBtn.className = "tab-btn tab-inactive";
+                          renderSettingsList();
+                      }
+                  }
+
+                  function populateSelect() {
+                      const select = document.getElementById('item-select');
+                      select.innerHTML = '';
+                      items.forEach((item, index) => {
+                          const opt = document.createElement('option');
+                          opt.value = index;
+                          opt.innerText = `${item.name} (${item.price} للمتر)`;
+                          select.appendChild(opt);
+                      });
+                      updatePriceHint();
+                  }
+
+                  function updatePriceHint() {
+                      const select = document.getElementById('item-select');
+                      const index = select.value;
+                      if(index !== '' && items[index]) {
+                          document.getElementById('price-hint').innerText = `سعر المتر المربع: ${items[index].price}`;
+                      }
+                  }
+
+                  function calculatePrice() {
+                      const index = document.getElementById('item-select').value;
+                      const length = parseFloat(document.getElementById('input-length').value);
+                      const width = parseFloat(document.getElementById('input-width').value);
+
+                      if(index === '' || isNaN(length) || isNaN(width) || length <= 0 || width <= 0) {
+                          showMsg('الرجاء اختيار الصنف وإدخال الطول والعرض بشكل صحيح.');
+                          return;
+                      }
+
+                      const pricePerSqM = items[index].price;
+                      const area = length * width;
+                      const total = area * pricePerSqM;
+
+                      document.getElementById('res-area').innerText = area.toFixed(2) + ' متر مربع';
+                      document.getElementById('res-total').innerText = total.toLocaleString();
+                  }
+
+                  function renderSettingsList() {
+                      const listEl = document.getElementById('items-settings-list');
+                      listEl.innerHTML = '';
+                      items.forEach((item, index) => {
+                          const div = document.createElement('div');
+                          div.className = "setting-item";
+                          div.innerHTML = `
+                              <input type="text" value="${item.name}" onchange="updateItemName(${index}, this.value)">
+                              <input type="number" value="${item.price}" onchange="updateItemPrice(${index}, this.value)">
+                              <button onclick="deleteItem(${index})" class="btn-del">🗑️</button>
+                          `;
+                          listEl.appendChild(div);
+                      });
+                  }
+
+                  function updateItemName(index, newName) {
+                      if(newName.trim() !== '') {
+                          items[index].name = newName.trim();
+                          saveToStorage();
+                      }
+                  }
+
+                  function updateItemPrice(index, newPrice) {
+                      const price = parseFloat(newPrice);
+                      if(!isNaN(price) && price >= 0) {
+                          items[index].price = price;
+                          saveToStorage();
+                      }
+                  }
+
+                  function deleteItem(index) {
+                      if(confirm('هل أنت متأكد من حذف هذا الصنف؟')) {
+                          items.splice(index, 1);
+                          saveToStorage();
+                          renderSettingsList();
+                      }
+                  }
+
+                  function addNewItem() {
+                      const nameInput = document.getElementById('new-item-name');
+                      const priceInput = document.getElementById('new-item-price');
+                      const name = nameInput.value.trim();
+                      const price = parseFloat(priceInput.value);
+
+                      if(name === '' || isNaN(price) || price < 0) {
+                          showMsg('الرجاء إدخال اسم الصنف وسعر صحيح للمتر.');
+                          return;
+                      }
+
+                      items.push({ id: 'item_' + Date.now(), name: name, price: price });
+                      saveToStorage();
+                      nameInput.value = '';
+                      priceInput.value = '';
+                      renderSettingsList();
+                      showMsg('تمت إضافة الصنف بنجاح!');
+                  }
+
+                  function resetToDefaults() {
+                      if(confirm('هل تريد استعادة الأصناف والأسعار الافتراضية؟')) {
+                          items = JSON.parse(JSON.stringify(defaultItems));
+                          saveToStorage();
+                          renderSettingsList();
+                          populateSelect();
+                      }
+                  }
+
+                  populateSelect();
+              </script>
+          </body>
+          </html>
+          EOF
+
+      - name: Build Gradle Wrapper
+        run: |
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
+          gradle wrapper --gradle-version 8.5
+          chmod +x gradlew
+
+      - name: Build Android APK
+        run: |
+          ./gradlew assembleDebug --no-daemon
+          cp app/build/outputs/apk/debug/app-debug.apk Azwaq-Sign-Calculator.apk
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Azwaq-Sign-Calculator-APK
+          path: Azwaq-Sign-Calculator.apk
